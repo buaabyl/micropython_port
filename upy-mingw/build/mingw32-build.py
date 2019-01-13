@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 #  
 #  This program is free software; you can redistribute it and/or modify
@@ -27,6 +27,7 @@ import os
 import stat
 import glob
 import json
+import shutil
 import subprocess
 
 
