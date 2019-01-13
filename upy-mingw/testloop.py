@@ -1,5 +1,7 @@
 import utime
+import micropython as upy
 
+@upy.native
 def loop():
     t1 = 0
     t2 = 0

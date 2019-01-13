@@ -43,12 +43,11 @@ CFLAGS_common = ' '.join(r'''
 -ansi
 -std=gnu99
 
--DMICROPY_NLR_SETJMP 
+-DMICROPY_NLR_SETJMP=1
 -DMICROPY_USE_READLINE=1
 -DUNIX
 -D__USE_MINGW_ANSI_STDIO=1
 '''.splitlines())
-
 
 CFLAGS_qstr_opt = ' '.join(r'''
 -DNO_QSTR
@@ -76,7 +75,9 @@ ASMSRCS_ALL = [
     r'..\py\nlrx64.s'
     r'..\py\nlrxtensa.s'
 ]
-ASMSRCS = []
+ASMSRCS = [
+    r'..\py\nlrx86.s'
+]
 
 CSRCS_ = [
     r'..\extmod\machine_mem.c',
