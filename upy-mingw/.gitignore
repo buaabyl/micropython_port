@@ -1,5 +1,7 @@
 build/genhdr/
 build/tmp/
+build/objs/
+build/noqstr.files
 build/*.exe
 build/*.lib
 build/*.a
