@@ -24,6 +24,7 @@
 from __future__ import print_function
 
 import os
+import sys
 import stat
 import glob
 import json
@@ -76,7 +77,6 @@ ASMSRCS_ALL = [
     r'..\py\nlrxtensa.s'
 ]
 ASMSRCS = [
-    r'..\py\nlrx86.s'
 ]
 
 CSRCS_ = [
@@ -307,6 +307,10 @@ if __name__ == '__main__':
     if not os.path.isdir('objs'):
         os.mkdir('objs')
 
-    qstr_optimize(CSRCS);
-    build(CSRCS, ASMSRCS)
+    if len(sys.argv) == 2 and sys.argv[1] == 'build':
+        build(CSRCS, ASMSRCS)
+
+    else:
+        qstr_optimize(CSRCS);
+        build(CSRCS, ASMSRCS)
 

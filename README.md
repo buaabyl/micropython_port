@@ -13,10 +13,15 @@ Micropython使用2步编译，这样的好处是已知的字符串都是rodata�
 
 ```
 ./py/modsys.c:38:   #include "genhdr/mpversion.h"
+./unix/main.c:50:   #include "genhdr/mpversion.h"
 ./py/qstr.c:106:    #include "genhdr/qstrdefs.generated.h"
 ./py/qstr.h:42:     #include "genhdr/qstrdefs.generated.h"
-./unix/main.c:50:   #include "genhdr/mpversion.h"
 ```
+
+其实只需要2个头文件：
+
+1. mpversion.h
+2. qstrdefs.generated.h
 
 
 
