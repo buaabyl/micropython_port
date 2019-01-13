@@ -29,6 +29,7 @@ import glob
 import subprocess
 
 
+#-----------------------------------------------------------
 CFLAGS_common = ' '.join(r'''
 -I .
 -I ..
@@ -65,41 +66,58 @@ CFLAGS = ' '.join(r'''
 '''.splitlines())
 
 
-# not assembly speedup
-ASMSRCS= [
-    r"..\py\nlrx64.s"
+#-----------------------------------------------------------
+# assembly for setjmp and longjmp
+#
+ASMSRCS_ALL = [
+    r'..\py\nlrx86.s'
+    r'..\py\nlrx64.s'
+    r'..\py\nlrxtensa.s'
 ]
 ASMSRCS = []
 
 CSRCS_ = [
-    r"..\py\*.c",
-    r"..\extmod\machine_mem.c",
-    r"..\extmod\machine_pinbase.c",
-    r"..\extmod\modubinascii.c",
-    r"..\extmod\moductypes.c",
-    r"..\extmod\moduhashlib.c",
-    r"..\extmod\moduheapq.c",
-    r"..\extmod\modujson.c",
-    r"..\extmod\modurandom.c",
-    r"..\extmod\modure.c",
-    r"..\extmod\moduzlib.c",
-    r"..\lib\mp-readline\*.c",
-    r"..\unix\file.c",
-    r"..\unix\gccollect.c",
-    r"..\unix\input.c",
-    r"..\unix\main.c",
-    r"..\unix\modos.c",
-    r"..\unix\modtime.c",
-    r"..\unix\modmachine.c",
-    r"..\windows\*.c",
-    r"..\windows\msvc\*.c",
+    r'..\extmod\machine_mem.c',
+    r'..\extmod\machine_pinbase.c',
+    r'..\extmod\modubinascii.c',
+    r'..\extmod\moductypes.c',
+    r'..\extmod\moduhashlib.c',
+    r'..\extmod\moduheapq.c',
+    r'..\extmod\modujson.c',
+    r'..\extmod\modurandom.c',
+    r'..\extmod\modure.c',
+    r'..\extmod\moduzlib.c',
+
+    r'..\lib\mp-readline\*.c',
+
+    r'..\py\*.c',
+
+    r'..\unix\file.c',
+    r'..\unix\gccollect.c',
+    r'..\unix\input.c',
+    r'..\unix\main.c',
+    r'..\unix\modos.c',
+    r'..\unix\modtime.c',
+    r'..\unix\modmachine.c',
+
+    r'..\windows\*.c',
+    r'..\windows\msvc\*.c',
+]
+
+EXCLUDE_NATIVE = [
+    r'..\py\asmarm.c',
+    r'..\py\asmthumb.c',
+    r'..\py\asmx86.c',
+    r'..\py\asmx64.c',
 ]
 
 CSRCS = []
 for pattern in CSRCS_:
     CSRCS.extend(glob.glob(pattern))
 
+CSRCS = list(filter(lambda v:v not in EXCLUDE_NATIVE, CSRCS))
 
+#-----------------------------------------------------------
 def file_put_contents(fn, d):
     f = open(fn, 'w', encoding='UTF-8')
     f.write(d)
@@ -117,18 +135,22 @@ def is_update(src, dst):
         return True
     return False
 
-def gcc_preprocess(CSRCS):
+def qstr_optimize(CSRCS):
     global CFLAGS_common
     global CFLAGS_qstr_opt
 
-    PWD = os.getcwd()
-    ROOT = os.path.dirname(PWD)
+    print('> create mpversion.h') 
+    subprocess.check_call("python ../py/makeversionhdr.py genhdr/mpversion.h")
 
-    l = []
+    print('> preprocess c files for QSTR optimize')
+    c_pp_pairs = []
     for infn in CSRCS:
         infn = os.path.abspath(infn)
-        outfn = 'tmp\\' + infn[len(ROOT)+1:].replace('\\', '_') + '.pp'
-        l.append((infn, outfn))
+        outfn = infn
+        for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
+            outfn = outfn.replace(m, r)
+        outfn = "tmp/" + outfn + ".pp"
+        c_pp_pairs.append((infn, outfn))
 
         if is_update(infn, outfn):
             print(' %s' % infn)
@@ -136,10 +158,7 @@ def gcc_preprocess(CSRCS):
             res = subprocess.check_output(' '.join(cmd))
             file_put_binary(outfn, res)
 
-    return l
-
-def analysis_preprocessed(c_pp_pairs):
-    global CFLAGS
+    print('> analysis qstr')
     for cfn, ppfn in c_pp_pairs:
         outfn = os.path.abspath(cfn)
         for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
@@ -154,21 +173,26 @@ def analysis_preprocessed(c_pp_pairs):
         else:
             print(' %s [skip]' % ppfn)
 
-    print('create genhdr/qstrdefscollected.h ...')
+    print('> collect all qstr* to qstrdefscollected.h')
     cmd = ['python', '../py/makeqstrdefs.py',
-           'cat', 'none', 'genhdr/qstr', 'genhdr/qstrdefscollected.h']
+           'cat', 'none',
+           'genhdr/qstr', 
+           'genhdr/qstrdefscollected.h']
     subprocess.check_call(' '.join(cmd))
 
+    print('> create qstrdefspreprocessed.h ...')
     cmd = ['gcc', CFLAGS_common, CFLAGS_qstr_opt, '../py/qstrdefs.h', '../unix/qstrdefsport.h']
     res = subprocess.check_output(' '.join(cmd))
     file_put_binary("genhdr/qstrdefspreprocessed.h", res)
 
+    print('> create rodata qstr to qstrdefs.generated.h')
     cmd = ['python', '../py/makeqstrdata.py',
-            'genhdr/qstrdefspreprocessed.h', 'genhdr/qstrdefscollected.h']
+            'genhdr/qstrdefspreprocessed.h',
+            'genhdr/qstrdefscollected.h']
     res = subprocess.check_output(' '.join(cmd))
     file_put_binary("genhdr/qstrdefs.generated.h", res)
 
-def gcc_compile(CSRCS, ASMSRCS):
+def build(CSRCS, ASMSRCS):
     global CFLAGS_common
     global CFLAGS
 
@@ -205,14 +229,6 @@ if __name__ == '__main__':
     if not os.path.isdir('tmp'):
         os.mkdir('tmp')
 
-    subprocess.check_call("python ../py/makeversionhdr.py genhdr/mpversion.h")
-
-    print('preprocess...')
-    PP_FILES = gcc_preprocess(CSRCS)
-
-    print('analysis...')
-    analysis_preprocessed(PP_FILES)
-
-    print("compiling...")
-    gcc_compile(CSRCS, ASMSRCS)
+    qstr_optimize(CSRCS)
+    build(CSRCS, ASMSRCS)
 
