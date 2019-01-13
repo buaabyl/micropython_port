@@ -1,0 +1,5 @@
+genhdr/
+tmp/
+*.exe
+*.lib
+*.a
