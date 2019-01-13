@@ -3,6 +3,23 @@
 可能最好的还是先用PicoC吧，这个方便一点。而Micropython的各种东西不太熟悉，需要花时间看看。
 
 
+## build
+
+Micropython使用2步编译，这样的好处是已知的字符串都是rodata，不需要占用ram空间。
+1. 预处理所有的C文件，然后用Python脚本找到所有的QSTR，生成一个数组。
+2. 将上边的数组生成一个头文件，然后正常的编译。
+
+调用的地方
+
+```
+./py/modsys.c:38:   #include "genhdr/mpversion.h"
+./py/qstr.c:106:    #include "genhdr/qstrdefs.generated.h"
+./py/qstr.h:42:     #include "genhdr/qstrdefs.generated.h"
+./unix/main.c:50:   #include "genhdr/mpversion.h"
+```
+
+
+
 ## 添加自定义的模块
 
 在 windows/mpconfigport.h 里有自定义模块的添加
