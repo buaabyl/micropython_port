@@ -5,3 +5,4 @@ build/noqstr.files
 build/*.exe
 build/*.lib
 build/*.a
+tags
