@@ -26,6 +26,7 @@ from __future__ import print_function
 import os
 import stat
 import glob
+import json
 import subprocess
 
 
@@ -118,6 +119,18 @@ for pattern in CSRCS_:
 CSRCS = list(filter(lambda v:v not in EXCLUDE_NATIVE, CSRCS))
 
 #-----------------------------------------------------------
+def file_get_contents(fn):
+    f = open(fn, 'r', encoding='UTF-8')
+    d = f.read()
+    f.close()
+    return d
+
+def file_get_binary(fn):
+    f = open(fn, 'rb')
+    d = f.read()
+    f.close()
+    return d
+
 def file_put_contents(fn, d):
     f = open(fn, 'w', encoding='UTF-8')
     f.write(d)
@@ -127,6 +140,15 @@ def file_put_binary(fn, d):
     f = open(fn, 'wb')
     f.write(d)
     f.close()
+
+def file_put_json(fn, obj):
+    jstr = json.dumps(obj, indent=4)
+    file_put_contents(fn, jstr)
+
+def file_get_json(fn):
+    jstr = file_get_contents(fn)
+    obj = json.loads(jstr)
+    return obj
 
 def is_update(src, dst):
     if not os.path.isfile(dst):
@@ -140,9 +162,24 @@ def qstr_optimize(CSRCS):
     global CFLAGS_qstr_opt
 
     print('> create mpversion.h') 
-    subprocess.check_call("python ../py/makeversionhdr.py genhdr/mpversion.h")
+
+    ver_new = 'genhdr/mpversion.h.tmp'
+    ver_file= 'genhdr/mpversion.h'
+    subprocess.check_call('python ../py/makeversionhdr.py ' +  ver_new)
+    if not os.path.isfile(ver_file):
+        shutil.copyfile(ver_new, ver_file)
+    else:
+        new = file_get_contents(ver_new)
+        old = file_get_contents(ver_file)
+        if old != new:
+            shutil.copyfile(ver_new, ver_file)
+        else:
+            print('mpversion.h not updated')
 
     print('> preprocess c files for QSTR optimize')
+
+    nr_touch = 0
+
     c_pp_pairs = []
     for infn in CSRCS:
         infn = os.path.abspath(infn)
@@ -157,21 +194,43 @@ def qstr_optimize(CSRCS):
             cmd = ["gcc", CFLAGS_common, CFLAGS_qstr_opt, infn]
             res = subprocess.check_output(' '.join(cmd))
             file_put_binary(outfn, res)
+            nr_touch = nr_touch + 1
 
     print('> analysis qstr')
+    if os.path.isfile('noqstr.files'):
+        map_no_output = file_get_json('noqstr.files')
+    else:
+        map_no_output = {}
+
     for cfn, ppfn in c_pp_pairs:
+        # generate output qstr filename from cfn
         outfn = os.path.abspath(cfn)
         for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
             outfn = outfn.replace(m, r)
         outfn = "genhdr/qstr/" + outfn + ".qstr"
 
-        if is_update(ppfn, outfn):
+        # check preprocessed result mtime
+        source_updated = False
+        mtime_new = os.stat(ppfn)[stat.ST_MTIME]
+        if ppfn in map_no_output:
+            mtime_old = map_no_output[ppfn]
+            if mtime_new > mtime_old:
+                source_updated = True
+        elif is_update(ppfn, outfn):
+            source_updated = True
+
+        map_no_output[ppfn] = mtime_new
+
+        if source_updated:
             print(' %s' % ppfn)
             cmd = ['python', '../py/makeqstrdefs.py', 
                    'split', ppfn, 'genhdr/qstr', 'genhdr/qstrdefscollected.h']
             subprocess.check_call(' '.join(cmd))
-        else:
-            print(' %s [skip]' % ppfn)
+            if os.path.exists(outfn):
+                del map_no_output[ppfn]
+                nr_touch = nr_touch + 1
+
+    file_put_json('noqstr.files', map_no_output)
 
     print('> collect all qstr* to qstrdefscollected.h')
     cmd = ['python', '../py/makeqstrdefs.py',
@@ -192,32 +251,46 @@ def qstr_optimize(CSRCS):
     res = subprocess.check_output(' '.join(cmd))
     file_put_binary("genhdr/qstrdefs.generated.h", res)
 
+    return nr_touch
+
 def build(CSRCS, ASMSRCS):
     global CFLAGS_common
     global CFLAGS
+    
+    nr_touch = 0
 
+    print('> compile c files')
     for cfn in CSRCS:
         outfn = cfn
         for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
             outfn = outfn.replace(m, r)
-        outfn = 'tmp/' + outfn + '.o'
+        outfn = 'objs/' + outfn + '.o'
 
         if is_update(cfn, outfn):
             print(' %s' % cfn)
             cmd = ['gcc', CFLAGS_common, CFLAGS, cfn, '-o', outfn]
             subprocess.check_call(' '.join(cmd))
+            nr_touch = nr_touch + 1
 
+    print('> compile assembly files')
     for sfn in ASMSRCS:
         outfn = sfn
         for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
             outfn = outfn.replace(m, r)
-        outfn = 'tmp/' + outfn + '.o'
+        outfn = 'objs/' + outfn + '.o'
 
-        print(' %s' % sfn)
-        cmd = ['gcc', CFLAGS_common, CFLAGS, sfn, '-o', outfn]
-        subprocess.check_call(' '.join(cmd))
+        if is_update(cfn, outfn):
+            print(' %s' % sfn)
+            cmd = ['gcc', CFLAGS_common, CFLAGS, sfn, '-o', outfn]
+            subprocess.check_call(' '.join(cmd))
+            nr_touch = nr_touch + 1
 
-    subprocess.check_call('gcc tmp/*.o -lm -o micropython')
+    if nr_touch == 0:
+        print('OBJECTS not updated')
+        return nr_touch
+
+    print('> linking micropython')
+    subprocess.check_call('gcc objs/*.o -lm -o micropython')
 
 if __name__ == '__main__':
     if not os.path.isdir('genhdr'):
@@ -229,6 +302,9 @@ if __name__ == '__main__':
     if not os.path.isdir('tmp'):
         os.mkdir('tmp')
 
-    qstr_optimize(CSRCS)
+    if not os.path.isdir('objs'):
+        os.mkdir('objs')
+
+    qstr_optimize(CSRCS);
     build(CSRCS, ASMSRCS)
 
