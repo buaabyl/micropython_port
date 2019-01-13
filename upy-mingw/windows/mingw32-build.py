@@ -1,4 +1,4 @@
-#!/bin/python
+#!/usr/bin/env python
 # -*- coding:utf-8 -*-
 #  
 #  This program is free software; you can redistribute it and/or modify
@@ -28,6 +28,49 @@ import stat
 import glob
 import subprocess
 
+
+CFLAGS_common = ' '.join(r'''
+-I .
+-I ..
+-I ../windows
+-I ../windows/msvc
+
+-Wall
+-Wpointer-arith
+-ansi
+-std=gnu99
+
+-DMICROPY_NLR_SETJMP 
+-DMICROPY_USE_READLINE=1
+-DUNIX
+-D__USE_MINGW_ANSI_STDIO=1
+'''.splitlines())
+
+
+CFLAGS_qstr_opt = ' '.join(r'''
+-DNO_QSTR
+-DN_X64
+-DN_X86
+-DN_THUMB
+-DN_ARM
+
+-Os
+-E
+'''.splitlines())
+
+
+CFLAGS = ' '.join(r'''
+-Os
+-c
+'''.splitlines())
+
+
+# not assembly speedup
+ASMSRCS= [
+    r"..\py\nlrx64.s"
+]
+ASMSRCS = []
+
 CSRCS_ = [
     r"..\py\*.c",
     r"..\extmod\machine_mem.c",
@@ -56,11 +99,14 @@ CSRCS = []
 for pattern in CSRCS_:
     CSRCS.extend(glob.glob(pattern))
 
-PWD = os.getcwd()
-ROOT = os.path.dirname(PWD)
 
 def file_put_contents(fn, d):
-    f = open(fn, 'w')
+    f = open(fn, 'w', encoding='UTF-8')
+    f.write(d)
+    f.close()
+
+def file_put_binary(fn, d):
+    f = open(fn, 'wb')
     f.write(d)
     f.close()
 
@@ -72,9 +118,11 @@ def is_update(src, dst):
     return False
 
 def gcc_preprocess(CSRCS):
-    CFLAGS = r"-I . -I .. -I ../windows -I ../windows/msvc -E -DNO_QSTR -DN_X64 -DN_X86 -DN_THUMB -DN_ARM " + \
-             r"-Wall -Wpointer-arith -Werror -ansi -std=gnu99 " + \
-             r"-DUNIX -D__USE_MINGW_ANSI_STDIO=1 -DMICROPY_USE_READLINE=1 -Os  "
+    global CFLAGS_common
+    global CFLAGS_qstr_opt
+
+    PWD = os.getcwd()
+    ROOT = os.path.dirname(PWD)
 
     l = []
     for infn in CSRCS:
@@ -84,16 +132,14 @@ def gcc_preprocess(CSRCS):
 
         if is_update(infn, outfn):
             print(' %s' % infn)
-            res = subprocess.check_output("gcc " + CFLAGS + " " + infn)
-            file_put_contents(outfn, res)
+            cmd = ["gcc", CFLAGS_common, CFLAGS_qstr_opt, infn]
+            res = subprocess.check_output(' '.join(cmd))
+            file_put_binary(outfn, res)
 
     return l
 
 def analysis_preprocessed(c_pp_pairs):
-    CFLAGS = r"-I . -I .. -I ../windows -I ../windows/msvc -E -DNO_QSTR -DN_X64 -DN_X86 -DN_THUMB -DN_ARM " + \
-             r"-Wall -Wpointer-arith -Werror -ansi -std=gnu99 " + \
-             r"-DUNIX -D__USE_MINGW_ANSI_STDIO=1 -DMICROPY_USE_READLINE=1 -Os  "
-
+    global CFLAGS
     for cfn, ppfn in c_pp_pairs:
         outfn = os.path.abspath(cfn)
         for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
@@ -102,25 +148,30 @@ def analysis_preprocessed(c_pp_pairs):
 
         if is_update(ppfn, outfn):
             print(' %s' % ppfn)
-            subprocess.check_call("python ../py/makeqstrdefs.py " + \
-                    "split %s genhdr/qstr genhdr/qstrdefscollected.h" % ppfn)
+            cmd = ['python', '../py/makeqstrdefs.py', 
+                   'split', ppfn, 'genhdr/qstr', 'genhdr/qstrdefscollected.h']
+            subprocess.check_call(' '.join(cmd))
         else:
             print(' %s [skip]' % ppfn)
 
     print('create genhdr/qstrdefscollected.h ...')
-    subprocess.check_call("python ../py/makeqstrdefs.py " + \
-            "cat none genhdr/qstr genhdr/qstrdefscollected.h")
+    cmd = ['python', '../py/makeqstrdefs.py',
+           'cat', 'none', 'genhdr/qstr', 'genhdr/qstrdefscollected.h']
+    subprocess.check_call(' '.join(cmd))
 
-    res = subprocess.check_output("gcc " + CFLAGS + " ../py/qstrdefs.h ../unix/qstrdefsport.h")
-    file_put_contents("genhdr/qstrdefspreprocessed.h", res)
+    cmd = ['gcc', CFLAGS_common, CFLAGS_qstr_opt, '../py/qstrdefs.h', '../unix/qstrdefsport.h']
+    res = subprocess.check_output(' '.join(cmd))
+    file_put_binary("genhdr/qstrdefspreprocessed.h", res)
 
-    res = subprocess.check_output("python ../py/makeqstrdata.py " + \
-            "genhdr/qstrdefspreprocessed.h genhdr/qstrdefscollected.h")
-    file_put_contents("genhdr/qstrdefs.generated.h", res)
+    cmd = ['python', '../py/makeqstrdata.py',
+            'genhdr/qstrdefspreprocessed.h', 'genhdr/qstrdefscollected.h']
+    res = subprocess.check_output(' '.join(cmd))
+    file_put_binary("genhdr/qstrdefs.generated.h", res)
 
-def gcc_compile(CSRCS):
-    CFLAGS = r"-I . -I .. -Wpointer-arith -Werror -ansi -std=gnu99 " + \
-             r"-DUNIX -D__USE_MINGW_ANSI_STDIO=1 -DMICROPY_USE_READLINE=1 -Os -c"
+def gcc_compile(CSRCS, ASMSRCS):
+    global CFLAGS_common
+    global CFLAGS
+
     for cfn in CSRCS:
         outfn = cfn
         for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
@@ -129,9 +180,19 @@ def gcc_compile(CSRCS):
 
         if is_update(cfn, outfn):
             print(' %s' % cfn)
-            subprocess.check_call('gcc ' + CFLAGS + ' '+ cfn + ' -o ' + outfn)
+            cmd = ['gcc', CFLAGS_common, CFLAGS, cfn, '-o', outfn]
+            subprocess.check_call(' '.join(cmd))
 
-    subprocess.check_call('gcc -c ../py/nlrx86.S -o tmp/@@__py__nlrx86.o')
+    for sfn in ASMSRCS:
+        outfn = sfn
+        for m, r in [("/", "__"), ("\\", "____"), (":", "@"), ("..", "@@")]:
+            outfn = outfn.replace(m, r)
+        outfn = 'tmp/' + outfn + '.o'
+
+        print(' %s' % sfn)
+        cmd = ['gcc', CFLAGS_common, CFLAGS, sfn, '-o', outfn]
+        subprocess.check_call(' '.join(cmd))
+
     subprocess.check_call('gcc tmp/*.o -lm -o micropython')
 
 if __name__ == '__main__':
@@ -153,5 +214,5 @@ if __name__ == '__main__':
     analysis_preprocessed(PP_FILES)
 
     print("compiling...")
-    gcc_compile(CSRCS)
+    gcc_compile(CSRCS, ASMSRCS)
 
